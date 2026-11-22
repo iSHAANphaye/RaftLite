@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package raftlite.v1;
+
+option go_package = "github.com/raftlite/proto/raftlite/v1;raftlitev1";
+
+// KVService exposes linearizable key-value storage operations to clients.
+service KVService {
+  rpc ClientPut(ClientPutRequest) returns (ClientPutResponse);
+  rpc ClientGet(ClientGetRequest) returns (ClientGetResponse);
+  rpc ClientCAS(ClientCASRequest) returns (ClientCASResponse);
+  rpc ClientDelete(ClientDeleteRequest) returns (ClientDeleteResponse);
+  rpc ClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
+}
+
+// ClientPutRequest stores or updates a key.
+message ClientPutRequest {
+  string client_id = 1;      // Unique client identifier for deduplication
+  uint64 sequence_num = 2;   // Monotonic client sequence number
+  string key = 3;            // Target key
+  string value = 4;          // Value payload to write
+}
+
+message ClientPutResponse {
+  bool success = 1;          // True if successfully committed and applied
+  string error = 2;          // Error message if unsuccessful
+  string leader_hint = 3;    // Current known leader address if contacted node is follower
+}
+
+// ClientGetRequest retrieves a key.
+message ClientGetRequest {
+  string key = 1;            // Target key
+  bool linearizable = 2;     // If true, asserts quorum lease/read-index before returning
+}
+
+message ClientGetResponse {
+  bool found = 1;            // True if key exists
+  string value = 2;          // Retrieved string value
+  string error = 3;          // Error message if unsuccessful
+  string leader_hint = 4;    // Current known leader address if contacted node is follower
+}
+
+// ClientCASRequest performs an atomic Compare-And-Swap operation.
+message ClientCASRequest {
+  string client_id = 1;
+  uint64 sequence_num = 2;
+  string key = 3;
+  string expected_value = 4; // Expected existing value (empty string if expected non-existent)
+  string new_value = 5;      // Value to write if condition matches
+}
+
+message ClientCASResponse {
+  bool success = 1;          // True if consensus log replication succeeded
+  bool swapped = 2;          // True if condition matched and swap executed
+  string current_value = 3;  // Existing value if swap failed
+  string error = 4;
+  string leader_hint = 5;
+}
+
+// ClientDeleteRequest removes a key.
+message ClientDeleteRequest {
+  string client_id = 1;
+  uint64 sequence_num = 2;
+  string key = 3;
+}
+
+message ClientDeleteResponse {
+  bool success = 1;
+  bool found = 2;
+  string error = 3;
+  string leader_hint = 4;
+}
+
+// ClusterStatus inspection messages.
+message ClusterStatusRequest {}
+
+message PeerStatus {
+  string peer_id = 1;
+  string address = 2;
+  uint64 match_index = 3;
+  uint64 next_index = 4;
+  bool reachable = 5;
+}
+
+message ClusterStatusResponse {
+  string node_id = 1;
+  string role = 2;           // FOLLOWER, CANDIDATE, LEADER
+  uint64 current_term = 3;
+  uint64 commit_index = 4;
+  uint64 last_applied = 5;
+  string leader_id = 6;
+  repeated PeerStatus peers = 7;
+}

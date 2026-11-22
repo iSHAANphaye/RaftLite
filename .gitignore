@@ -1,0 +1,25 @@
+# Binaries
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/raftd
+/raftctl
+
+# Test & coverage artifacts
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# State & data files
+data/
+*.wal
+*.meta
+
+# OS & Environment
+.env
+.DS_Store

@@ -1,0 +1,118 @@
+version: '3.8'
+
+networks:
+  raftlite-net:
+    driver: bridge
+
+services:
+  node-1:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: raftlite-node-1
+    command: >
+      /usr/local/bin/raftd
+      --node-id=node-1
+      --listen-addr=0.0.0.0:9091
+      --client-addr=0.0.0.0:8081
+      --peers=node-2=node-2:9092,node-3=node-3:9093,node-4=node-4:9094,node-5=node-5:9095
+      --data-dir=/var/lib/raftlite/data
+      --sync=true
+    ports:
+      - "8081:8081"
+      - "9091:9091"
+    volumes:
+      - node1-data:/var/lib/raftlite/data
+    networks:
+      - raftlite-net
+
+  node-2:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: raftlite-node-2
+    command: >
+      /usr/local/bin/raftd
+      --node-id=node-2
+      --listen-addr=0.0.0.0:9092
+      --client-addr=0.0.0.0:8082
+      --peers=node-1=node-1:9091,node-3=node-3:9093,node-4=node-4:9094,node-5=node-5:9095
+      --data-dir=/var/lib/raftlite/data
+      --sync=true
+    ports:
+      - "8082:8082"
+      - "9092:9092"
+    volumes:
+      - node2-data:/var/lib/raftlite/data
+    networks:
+      - raftlite-net
+
+  node-3:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: raftlite-node-3
+    command: >
+      /usr/local/bin/raftd
+      --node-id=node-3
+      --listen-addr=0.0.0.0:9093
+      --client-addr=0.0.0.0:8083
+      --peers=node-1=node-1:9091,node-2=node-2:9092,node-4=node-4:9094,node-5=node-5:9095
+      --data-dir=/var/lib/raftlite/data
+      --sync=true
+    ports:
+      - "8083:8083"
+      - "9093:9093"
+    volumes:
+      - node3-data:/var/lib/raftlite/data
+    networks:
+      - raftlite-net
+
+  node-4:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: raftlite-node-4
+    command: >
+      /usr/local/bin/raftd
+      --node-id=node-4
+      --listen-addr=0.0.0.0:9094
+      --client-addr=0.0.0.0:8084
+      --peers=node-1=node-1:9091,node-2=node-2:9092,node-3=node-3:9093,node-5=node-5:9095
+      --data-dir=/var/lib/raftlite/data
+      --sync=true
+    ports:
+      - "8084:8084"
+      - "9094:9094"
+    volumes:
+      - node4-data:/var/lib/raftlite/data
+    networks:
+      - raftlite-net
+
+  node-5:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: raftlite-node-5
+    command: >
+      /usr/local/bin/raftd
+      --node-id=node-5
+      --listen-addr=0.0.0.0:9095
+      --client-addr=0.0.0.0:8085
+      --peers=node-1=node-1:9091,node-2=node-2:9092,node-3=node-3:9093,node-4=node-4:9094
+      --data-dir=/var/lib/raftlite/data
+      --sync=true
+    ports:
+      - "8085:8085"
+      - "9095:9095"
+    volumes:
+      - node5-data:/var/lib/raftlite/data
+    networks:
+      - raftlite-net
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+  node4-data:
+  node5-data:
