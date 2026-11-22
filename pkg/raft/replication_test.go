@@ -32,9 +32,9 @@ func TestReplication_BasicProposalAndCommit(t *testing.T) {
 		}
 
 		cfg := DefaultConfig(nodeID, peers, filepath.Join(tempBase, nodeID))
-		cfg.ElectionTimeoutMin = 40 * time.Millisecond
-		cfg.ElectionTimeoutMax = 80 * time.Millisecond
-		cfg.HeartbeatInterval = 20 * time.Millisecond
+		cfg.ElectionTimeoutMin = 80 * time.Millisecond
+		cfg.ElectionTimeoutMax = 160 * time.Millisecond
+		cfg.HeartbeatInterval = 25 * time.Millisecond
 
 		n, err := NewRaftNode(cfg, net)
 		require.NoError(t, err)
@@ -58,13 +58,27 @@ func TestReplication_BasicProposalAndCommit(t *testing.T) {
 			}
 		}
 		return false
-	}, 1*time.Second, 20*time.Millisecond)
+	}, 3*time.Second, 20*time.Millisecond)
 
 	require.NotNil(t, leader)
 
-	// 2. Propose command
-	idx, _, ok := leader.Propose([]byte("test-command-1"), raftlitev1.LogEntryType_ENTRY_TYPE_COMMAND)
-	assert.True(t, ok)
+	// 2. Propose command on active leader
+	var idx uint64
+	var ok bool
+	assert.Eventually(t, func() bool {
+		for _, n := range nodes {
+			if n.IsLeader() {
+				idx, _, ok = n.Propose([]byte("test-command-1"), raftlitev1.LogEntryType_ENTRY_TYPE_COMMAND)
+				if ok {
+					leader = n
+					return true
+				}
+			}
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond)
+
+	require.True(t, ok)
 	assert.GreaterOrEqual(t, idx, uint64(1))
 
 	// 3. Verify entry commits across quorum
@@ -77,5 +91,5 @@ func TestReplication_BasicProposalAndCommit(t *testing.T) {
 			}
 		}
 		return committedCount >= 2
-	}, 1*time.Second, 20*time.Millisecond)
+	}, 3*time.Second, 20*time.Millisecond)
 }

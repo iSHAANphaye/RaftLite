@@ -12,6 +12,9 @@ func (n *RaftNode) becomeLeaderLocked() {
 	n.state.role = RoleLeader
 	n.state.leaderID = n.config.NodeID
 
+	// Stop election timer on leader to prevent self-timeout
+	n.stopElectionTimerLocked()
+
 	lastLogIndex, _ := n.state.lastLogIndexAndTermLocked()
 	peers := n.getPeerIDs()
 

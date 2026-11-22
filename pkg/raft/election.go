@@ -36,6 +36,18 @@ func (n *RaftNode) resetElectionTimerLocked() {
 	n.electionTimer.Reset(n.randomElectionDuration())
 }
 
+// stopElectionTimerLocked halts the election timer on active leaders.
+func (n *RaftNode) stopElectionTimerLocked() {
+	if n.electionTimer != nil {
+		if !n.electionTimer.Stop() {
+			select {
+			case <-n.electionTimer.C:
+			default:
+			}
+		}
+	}
+}
+
 // startElection triggers an election cycle when the election timer expires.
 func (n *RaftNode) startElection() {
 	n.state.mu.Lock()

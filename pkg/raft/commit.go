@@ -18,6 +18,7 @@ func (n *RaftNode) advanceCommitIndexLocked() {
 	majority := totalNodes/2 + 1
 
 	lastLogIndex, _ := n.state.lastLogIndexAndTermLocked()
+	oldCommit := n.state.commitIndex
 
 	// Check each candidate index N from commitIndex + 1 to lastLogIndex
 	for candidateN := n.state.commitIndex + 1; candidateN <= lastLogIndex; candidateN++ {
@@ -39,7 +40,11 @@ func (n *RaftNode) advanceCommitIndexLocked() {
 		}
 	}
 
-	n.notifyApply()
+	if n.state.commitIndex > oldCommit {
+		n.notifyApply()
+		// Immediately broadcast updated commitIndex to all followers
+		go n.broadcastAppendEntries(true)
+	}
 }
 
 // notifyApply signals the apply worker goroutine that commitIndex has advanced.
