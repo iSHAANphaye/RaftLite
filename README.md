@@ -1,14 +1,64 @@
+<div align="center">
+
+<img src="./docs/assets/raftlite-hero-banner.jpg" alt="RaftLite Hero Banner" width="100%" />
+
 # RaftLite — Distributed Consensus & Replicated Key-Value Store
 
-[![Go Version](https://img.shields.io/badge/Go-1.22-00ADD8?style=flat&logo=go)](https://golang.org)
-[![Consensus Protocol](https://img.shields.io/badge/Consensus-Raft%20(CFT)-blueviolet.svg)](https://raft.github.io)
-[![Storage Engine](https://img.shields.io/badge/Storage-Binary%20WAL%20(CRC32)-orange.svg)]()
-[![Race Detector](https://img.shields.io/badge/Race%20Detector-100%25%20Clean-success.svg)]()
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/Go-1.22-00ADD8?style=flat-square&logo=go)](https://golang.org)
+[![Consensus Protocol](https://img.shields.io/badge/Consensus-Raft%20(CFT)-F59E0B.svg?style=flat-square)](https://raft.github.io)
+[![Storage Engine](https://img.shields.io/badge/Storage-Binary%20WAL%20(CRC32)-38BDF8.svg?style=flat-square)]()
+[![Race Detector](https://img.shields.io/badge/Race%20Detector-100%25%20Clean-success.svg?style=flat-square)]()
+[![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
+
+> **High-performance, crash-fault-tolerant (CFT) distributed consensus engine and replicated Key-Value store in Go 1.22—complete Raft implementation with CRC32 binary WAL, term-based accelerated backtracking, linearizable client deduplication, and in-process network chaos injection.**
+
+</div>
+
+---
+
+## Overview
 
 **RaftLite** is a high-performance, crash-fault-tolerant (CFT) distributed consensus engine and replicated Key-Value store implemented in **Go 1.22** using **gRPC** and **Protocol Buffers**.
 
 Engineered for extreme reliability, concurrency safety, and determinism, RaftLite implements the complete Raft consensus specification (Ongaro & Ousterhout) enhanced with production-grade durability: an append-only binary Write-Ahead Log (WAL) with CRC32-IEEE framing, torn write auto-recovery, accelerated term-based log conflict backtracking, linearizable client request deduplication, and an in-process network chaos emulation interceptor (`netem`).
+
+---
+
+## 🏛 Consensus Architecture & Pipeline Workflow
+
+RaftLite processes proposals and achieves distributed consensus through an interconnected 5-stage pipeline backed by in-process chaos testing:
+
+<div align="center">
+  <img src="./docs/assets/raftlite-consensus-workflow.jpg" alt="RaftLite Consensus Pipeline & Chaos Harness" width="100%" />
+</div>
+
+### Consensus Pipeline Stages:
+
+1. **Stage 1: Client Proposal (`raftctl` / gRPC)**:
+   - Client sends atomic command (`Put`, `Get`, `CAS`, `Delete`) to the cluster via gRPC.
+   - Non-leader nodes transparently redirect the client to the currently known leader.
+
+2. **Stage 2: Elected Leader (Term & Heartbeat Manager)**:
+   - Randomized election timers ($150\text{ms} - 300\text{ms}$) with leak-free channel drainage prevent split-vote deadlocks.
+   - Frequent leader heartbeats ($50\text{ms}$) suppress spurious elections while maintaining quorum dominance.
+   - Adheres strictly to the **Election Restriction Rule (§5.4.1)**: candidates with stale logs cannot be elected.
+
+3. **Stage 3: Quorum Log Replication & Accelerated Conflict Backtracking**:
+   - Leader broadcasts `AppendEntries` RPCs to all peers concurrently.
+   - Follower detects log mismatches and returns `conflictTerm` and `conflictFirstIndex`, enabling the leader to bypass entire conflicting terms in a single RPC round-trip.
+   - Dynamic majority quorum evaluation ($N/2 + 1$) strictly enforces **Ongaro's Rule (§5.4.2)**: entries from prior terms are *never* committed by replica count alone.
+
+4. **Stage 4: Binary WAL & CRC32 Framing**:
+   - Binary framing layout: `[CRC32: 4B | Term: 8B | Index: 8B | Type: 1B | CommandLen: 4B | CommandBytes: NB]`.
+   - Synchronous `fsync()` guarantees durability before acknowledging RPCs.
+   - Automated startup scanner with torn-write truncation at corrupted frame boundaries.
+
+5. **Stage 5: Linearizable Replicated State Machine (KV Store)**:
+   - In-memory key-value engine executes committed log entries sequentially over an asynchronous `applyCh`.
+   - Client session deduplication table (`clientId` + `sequenceNum`) caches results to guarantee strictly *exactly-once* execution across retries and leader failovers.
+
+* **In-Process Chaos Monkey (`netem`)**:
+  - Intercepts gRPC client and server streams to simulate asymmetric network partitions, arbitrary packet drop rates, and configurable latency/jitter without requiring root OS privileges.
 
 ---
 
@@ -18,58 +68,24 @@ Engineered for extreme reliability, concurrency safety, and determinism, RaftLit
    - Formal implementation of **Leader**, **Follower**, and **Candidate** roles.
    - Randomized election timeouts ($150\text{ms} - 300\text{ms}$) with leak-free timer drainage.
    - Frequent leader heartbeats ($50\text{ms}$) to suppress spurious elections.
-   - Strict adherence to the **Election Restriction Rule (§5.4.1)**: candidates with stale logs cannot be elected.
+   - Strict adherence to the **Election Restriction Rule (§5.4.1)**.
 2. **Fast Log Conflict Backtracking:**
-   - Term-based accelerated backtracking: follower returns `conflictTerm` and `conflictFirstIndex` upon log mismatch, allowing the leader to bypass entire conflicting terms in a single RPC round-trip rather than decrementing `nextIndex` by 1 per entry.
+   - Term-based accelerated backtracking: follower returns `conflictTerm` and `conflictFirstIndex` upon log mismatch, allowing the leader to bypass entire conflicting terms in a single RPC round-trip.
 3. **Majority CommitIndex Advancement:**
-   - Leader dynamically evaluates peer `matchIndex` medians, strictly enforcing **Ongaro's Rule (§5.4.2)**: entries from prior terms are *never* committed by replica count alone, preventing historic log overwrite bugs.
+   - Leader dynamically evaluates peer `matchIndex` medians, strictly enforcing **Ongaro's Rule (§5.4.2)**.
 4. **Binary Write-Ahead Log (WAL) with CRC32 Framing:**
-   - Append-only binary framing: `[CRC32: 4B | Term: 8B | Index: 8B | Type: 1B | CommandLen: 4B | CommandBytes: NB]`.
+   - Append-only binary framing with CRC32-IEEE checksum verification.
    - Synchronous `fsync()` guarantees before acknowledging RPCs.
    - Automated crash scanner with torn-write truncation at corrupted frame boundaries.
 5. **Linearizable Replicated State Machine & Client Deduplication:**
    - In-memory key-value engine supporting atomic `Get`, `Put`, `Delete`, and `CAS` (Compare-And-Swap) operations over an asynchronous `applyCh`.
-   - Client session deduplication table (`clientId` + `sequenceNum`) caching results to guarantee strictly *exactly-once* execution across retries and leader failovers.
+   - Client session deduplication table caching results to guarantee strictly *exactly-once* execution across retries.
 6. **Network Chaos & Fault-Injection Harness (`netem`):**
-   - In-process gRPC client/server interceptors simulating asymmetric network partitions, arbitrary packet drop rates, and configurable latency/jitter without requiring root OS access.
+   - In-process gRPC interceptors simulating asymmetric network partitions, arbitrary packet drop rates, and latency jitter.
 7. **Production Tooling & Cluster Orchestration:**
    - Main cluster server daemon: `raftd`.
    - Administrative operator and benchmarking utility: `raftctl`.
    - Ready-to-run 3-node and 5-node Docker Compose topologies.
-
----
-
-## Architecture Overview
-
-```
-                      +-----------------------------+
-                      |   Client CLI (raftctl) /    |
-                      |   Application SDK (gRPC)    |
-                      +--------------+--------------+
-                                     |
-                                     v
-+------------------------------------+------------------------------------+
-|  RaftLite Node (raftd)                                                  |
-|                                                                         |
-|   +-----------------------+             +---------------------------+   |
-|   | KVService (Port 8081) |             | RaftService (Port 9091)   |   |
-|   | Get, Put, CAS, Delete |             | AppendEntries, RequestVote|   |
-|   +-----------+-----------+             +-------------+-------------+   |
-|               |                                       |                 |
-|               v                                       v                 |
-|   +-------------------------------------------------------------+       |
-|   |                   Raft Consensus Core                       |       |
-|   |      (Role State Machine, Election Timers, Heartbeats)      |       |
-|   +-------------+-------------------------------+---------------+       |
-|                 |                               |                       |
-|                 v (applyCh)                     v (fsync)               |
-|   +---------------------------+   +---------------------------------+   |
-|   | Replicated KV State       |   | Binary Write-Ahead Log (WAL)    |   |
-|   | - In-Memory Store         |   | - CRC32 IEEE Framing            |   |
-|   | - Client Dedup Session    |   | - Torn Write Truncation Scanner |   |
-|   +---------------------------+   +---------------------------------+   |
-+-------------------------------------------------------------------------+
-```
 
 ---
 
@@ -79,11 +95,11 @@ Comprehensive engineering specifications are located in the [`docs/`](docs/) dir
 
 | Document | Purpose & Contents | Link |
 | :--- | :--- | :--- |
-| **Product Requirements Document (PRD)** | Problem statement, target personas, product vision, feature requirements matrix, end-to-end request flows, and success metrics. | [docs/PRD.md](docs/PRD.md) |
-| **System Architecture Specification** | Tech stack justification, folder structure, binary WAL framing, fast backtracking algorithm, state machine deduplication, and Mermaid diagrams. | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| **Security & Threat Model** | CFT vs BFT assumptions, transport security (mTLS, cluster tokens), storage integrity (CRC32), edge cases (split-brain, stale reads), and failure recovery playbook. | [docs/SECURITY.md](docs/SECURITY.md) |
-| **Interface Specification** | Complete Protocol Buffers (`raft.proto`, `kv.proto`), gRPC status codes, `raftd` daemon flags, `raftctl` CLI commands, and Docker Compose files. | [docs/INTERFACE_SPEC.md](docs/INTERFACE_SPEC.md) |
-| **Feature Tickets & Roadmap** | 13 atomic, sequential implementation tickets (TICKET-RL-001 through TICKET-RL-013) with precise AI prompts and verifiable acceptance criteria. | [docs/FEATURE_TICKETS.md](docs/FEATURE_TICKETS.md) |
+| **Product Requirements Document (PRD)** | Problem statement, target personas, product vision, feature requirements matrix, end-to-end request flows, and success metrics. | [PRD.md](docs/PRD.md) |
+| **System Architecture Specification** | Tech stack justification, folder structure, binary WAL framing, fast backtracking algorithm, state machine deduplication, and Mermaid diagrams. | [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| **Security & Threat Model** | CFT vs BFT assumptions, transport security (mTLS, cluster tokens), storage integrity (CRC32), edge cases (split-brain, stale reads), and failure recovery playbook. | [SECURITY.md](docs/SECURITY.md) |
+| **Interface Specification** | Complete Protocol Buffers (`raft.proto`, `kv.proto`), gRPC status codes, `raftd` daemon flags, `raftctl` CLI commands, and Docker Compose files. | [INTERFACE_SPEC.md](docs/INTERFACE_SPEC.md) |
+| **Feature Tickets & Roadmap** | 13 atomic, sequential implementation tickets with precise AI prompts and verifiable acceptance criteria. | [FEATURE_TICKETS.md](docs/FEATURE_TICKETS.md) |
 
 ---
 
@@ -97,8 +113,8 @@ Comprehensive engineering specifications are located in the [`docs/`](docs/) dir
 ### 2. Building from Source
 ```bash
 # Clone repository
-git clone https://github.com/raftlite/raftlite.git
-cd raftlite
+git clone https://github.com/iSHAANphaye/RaftLite.git
+cd RaftLite
 
 # Compile Protocol Buffers
 make proto
